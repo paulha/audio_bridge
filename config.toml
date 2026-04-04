@@ -61,13 +61,13 @@ bitrate     = 24000     # Opus bitrate in bps (8000–510000; 16000–32000 suit
 # Depth of the receive queue in milliseconds.
 # Lower = less latency but more risk of audio glitches on a busy WiFi network.
 # 40ms = 2 frames at 20ms/frame.  Increase to 80–120 if you hear dropouts.
-jitter_ms = 40
+jitter_ms = 100
 
 
 # ── Statistics ───────────────────────────────────────────────────────────────
 [stats]
 # Print packet-loss statistics every N seconds (0 to disable)
-interval_s = 10
+interval_s = 60
 
 
 # ── Reconnection / connection health ────────────────────────────────────────
