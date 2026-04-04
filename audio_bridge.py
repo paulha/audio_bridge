@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 audio_bridge.py  ─  Bidirectional radio audio bridge over UDP + Opus
 
@@ -367,6 +367,9 @@ def resolve_host(name: str) -> str:
 # Audio device helper
 # ─────────────────────────────────────────────────────────────────────────────
 
+_devices_listed = False
+
+
 def find_device(name: str, kind: str):
     """
     Return sounddevice device index matching *name* for the given *kind*
@@ -381,6 +384,10 @@ def find_device(name: str, kind: str):
     logging.getLogger("audio").warning(
         "Device %r not found for %s – using system default.", name, kind
     )
+    global _devices_listed
+    if not _devices_listed:
+        list_devices()
+        _devices_listed = True
     return None
 
 
@@ -781,10 +788,6 @@ def main():
 
     codec = build_codec(cfg["codec"])
 
-    # ── Print devices so user can verify names ────────────────────────────────
-
-    list_devices()
-
     # ── Wire up sender / receiver based on role ───────────────────────────────
 
     if role == "remote":
@@ -862,3 +865,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
