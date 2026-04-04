@@ -1,0 +1,79 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  audio_bridge configuration
+#  One file works on BOTH machines — just change [mode].role and copy it over.
+#
+#  Run  python audio_bridge.py --list-devices  to see exact device names.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Role ────────────────────────────────────────────────────────────────────
+[mode]
+# "remote" = the Win10 machine connected to the radio
+# "local"  = the Win11 operator machine
+role = "remote"
+
+
+# ── Network ─────────────────────────────────────────────────────────────────
+[network]
+# IP address of the Win10 (radio) machine
+remote_ip = "10.1.1.105"    # Maxwell (Win10, radio machine)
+
+# IP address of the Win11 (operator) machine
+local_ip  = "10.1.1.151"   # Walnut  (Win11, operator machine)
+
+# UDP port the LOCAL machine listens on for incoming radio-RX audio
+# (remote sends to this port; local receives on this port)
+rx_port = 5001
+
+# UDP port the REMOTE machine listens on for incoming operator-TX audio
+# (local sends to this port; remote receives on this port)
+tx_port = 5002
+
+
+# ── Audio devices ────────────────────────────────────────────────────────────
+# Use  python audio_bridge.py --list-devices  to find exact device names.
+# Partial names are matched (case-insensitive substring).
+# Use "default" to let the OS choose.
+
+[audio.remote]
+# The Yaesu's USB audio interface on the Win10 machine.
+# "USB Codec" usually matches both the mic and speaker sides of the interface.
+# If they differ, check --list-devices output and be more specific.
+capture_device  = "USB Audio CODEC"    # USB Codec Microphone  (radio RX → this mic)
+playback_device = "USB Audio CODEC"    # USB Codec Speaker     (this speaker → radio TX)
+
+[audio.local]
+# Audio devices on the Win11 operator machine.
+capture_device  = "Microphone"      # your headset/desk mic
+playback_device = "Headphones"      # your headphones/speakers
+
+
+# ── Codec ────────────────────────────────────────────────────────────────────
+[codec]
+sample_rate = 16000     # Hz  (16000 = narrowband voice, sufficient for radio)
+                        # Use 48000 if your radio outputs wideband/digital audio.
+channels    = 1         # Mono – radio audio is always mono
+frame_ms    = 20        # Opus frame size in ms (10, 20, 40, or 60 only)
+bitrate     = 24000     # Opus bitrate in bps (8000–510000; 16000–32000 suits voice)
+
+
+# ── Jitter buffer ────────────────────────────────────────────────────────────
+[buffer]
+# Depth of the receive queue in milliseconds.
+# Lower = less latency but more risk of audio glitches on a busy WiFi network.
+# 40ms = 2 frames at 20ms/frame.  Increase to 80–120 if you hear dropouts.
+jitter_ms = 40
+
+
+# ── Statistics ───────────────────────────────────────────────────────────────
+[stats]
+# Print packet-loss statistics every N seconds (0 to disable)
+interval_s = 10
+
+
+# ── Reconnection / connection health ────────────────────────────────────────
+[reconnect]
+# If no audio packets arrive for this many seconds, log a SILENT warning.
+timeout_s     = 5.0
+
+# How often to send keepalive (heartbeat) UDP packets when no audio is flowing.
+heartbeat_s   = 1.0

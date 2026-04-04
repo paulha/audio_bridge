@@ -1,0 +1,16 @@
+# audio_bridge dependencies
+# Install with:  pip install -r requirements.txt
+
+sounddevice>=0.4.6
+numpy>=1.24
+
+# Opus codec – PyOgg is recommended on Windows because it bundles opus.dll
+# inside its wheel; no separate DLL download required.
+pyogg>=0.6.1a1
+
+# opuslib is an alternative if you already have it installed.
+# The script tries PyOgg first, then opuslib, then falls back to raw PCM.
+# opuslib>=3.0.1
+
+# TOML parser – only needed on Python < 3.11:
+# tomli>=2.0
