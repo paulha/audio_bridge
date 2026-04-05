@@ -15,10 +15,10 @@ role = "remote"
 # ── Network ─────────────────────────────────────────────────────────────────
 [network]
 # IP address of the Win10 (radio) machine
-remote_ip = "10.1.1.105"    # Maxwell (Win10, radio machine)
+remote_ip = "Maxwell"    # Maxwell (Win10, radio machine)
 
 # IP address of the Win11 (operator) machine
-local_ip  = "10.1.1.151"   # Walnut  (Win11, operator machine)
+local_ip  = "Walnut"     # Walnut  (Win11, operator machine)
 
 # UDP port the LOCAL machine listens on for incoming radio-RX audio
 # (remote sends to this port; local receives on this port)
