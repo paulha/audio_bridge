@@ -43,8 +43,8 @@ playback_device = "USB Audio CODEC"    # USB Codec Speaker     (this speaker →
 
 [audio.local]
 # Audio devices on the Win11 operator machine.
-capture_device  = "Microphone"      # your headset/desk mic
-playback_device = "Headphones"      # your headphones/speakers
+capture_device  = "default"      # your headset/desk mic
+playback_device = "default"      # your headphones/speakers
 
 
 # ── Codec ────────────────────────────────────────────────────────────────────
