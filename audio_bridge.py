@@ -727,28 +727,28 @@ class Monitor:
 
             if self._iv > 0 and tick % max(1, int(self._iv)) == 0:
                 print("\n── Stream Statistics ───────────────────────────────────────────")
-            for s in self._stats:
-                r = s.report()
-                print(f"  {r['name']:<22}  "
-                      f"rx={r['rx']:5d}  lost={r['lost']:4d}  "
-                      f"({r['loss']:5.1f}%)  ooo={r['ooo']:3d}  "
-                      f"{r['pps']:.1f} pkt/s")
-            for rv in self._recvs:
-                age    = time.monotonic() - rv.last_pkt if rv.last_pkt else float("inf")
-                ok     = age < self._timeout
-                label  = f"{age:.1f}s ago" if rv.last_pkt else "no packets yet"
-                status = "OK" if ok else "SILENT"
-                # _was_ok is None until we have seen at least one stats cycle;
-                # this suppresses a false "SILENT" warning on the very first tick.
-                was = self._was_ok.get(id(rv))
-                if was is not None:
-                    if ok and not was:
-                        log.info("%s: stream restored", rv.log.name)
-                    elif not ok and was:
-                        log.warning("%s: no packets for %.0fs", rv.log.name, age)
-                self._was_ok[id(rv)] = ok
-                print(f"  {rv.log.name:<22}  last packet: {label:<18}  [{status}]")
-            print("────────────────────────────────────────────────────────────────")
+                for s in self._stats:
+                    r = s.report()
+                    print(f"  {r['name']:<22}  "
+                          f"rx={r['rx']:5d}  lost={r['lost']:4d}  "
+                          f"({r['loss']:5.1f}%)  ooo={r['ooo']:3d}  "
+                          f"{r['pps']:.1f} pkt/s")
+                for rv in self._recvs:
+                    age    = time.monotonic() - rv.last_pkt if rv.last_pkt else float("inf")
+                    ok     = age < self._timeout
+                    label  = f"{age:.1f}s ago" if rv.last_pkt else "no packets yet"
+                    status = "OK" if ok else "SILENT"
+                    # _was_ok is None until we have seen at least one stats cycle;
+                    # this suppresses a false "SILENT" warning on the very first tick.
+                    was = self._was_ok.get(id(rv))
+                    if was is not None:
+                        if ok and not was:
+                            log.info("%s: stream restored", rv.log.name)
+                        elif not ok and was:
+                            log.warning("%s: no packets for %.0fs", rv.log.name, age)
+                    self._was_ok[id(rv)] = ok
+                    print(f"  {rv.log.name:<22}  last packet: {label:<18}  [{status}]")
+                print("────────────────────────────────────────────────────────────────")
 
     def stop(self):
         self._stop.set()
