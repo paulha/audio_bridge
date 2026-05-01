@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 audio_bridge.py  ─  Bidirectional radio audio bridge over UDP + Opus
 
@@ -23,12 +23,36 @@ import logging
 import queue
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
 import numpy as np
+
+_RESTART_EVENT = threading.Event()
+
+def get_default_device_names():
+    code = (
+        "import sounddevice as sd; "
+        "d = sd.default.device; "
+        "i = sd.query_devices(d[0])['name'] if d[0] is not None else ''; "
+        "o = sd.query_devices(d[1])['name'] if d[1] is not None else ''; "
+        "print(i + '|||' + o)"
+    )
+    try:
+        flags = 0x08000000 if sys.platform == "win32" else 0
+        out = subprocess.check_output(
+            [sys.executable, "-c", code], 
+            creationflags=flags,
+            timeout=2
+        ).decode("utf-8", errors="ignore").strip()
+        if "|||" in out:
+            return out.split("|||", 1)
+        return None, None
+    except Exception:
+        return None, None
 
 # ── TOML parser ───────────────────────────────────────────────────────────────
 try:
@@ -375,20 +399,15 @@ def find_device(name: str, kind: str):
     Return sounddevice device index matching *name* for the given *kind*
     ('input' or 'output').  Returns None (system default) if name is 'default'
     or empty.  Matches case-insensitively on substring of device name.
+    Raises RuntimeError if a specific named device is not found.
     """
     if not name or name.strip().lower() == "default":
         return None
+    name_lower = name.lower()
     for i, d in enumerate(sd.query_devices()):
-        if name.lower() in d["name"].lower() and d[f"max_{kind}_channels"] > 0:
+        if name_lower in d["name"].lower() and d[f"max_{kind}_channels"] > 0:
             return i
-    logging.getLogger("audio").warning(
-        "Device %r not found for %s – using system default.", name, kind
-    )
-    global _devices_listed
-    if not _devices_listed:
-        list_devices()
-        _devices_listed = True
-    return None
+    raise RuntimeError(f"Device {name!r} not found for {kind}")
 
 
 def list_devices():
@@ -449,10 +468,10 @@ class Sender:
     # ── encoding + send thread ────────────────────────────────────────────────
 
     def _run(self):
-        dev = find_device(self.device, "input")
-        sr, ch, fps = self.codec.sr, self.codec.ch, self.codec.fps
-
         try:
+            dev = find_device(self.device, "input")
+            sr, ch, fps = self.codec.sr, self.codec.ch, self.codec.fps
+
             with sd.InputStream(
                 device     = dev,
                 samplerate = sr,
@@ -485,7 +504,9 @@ class Sender:
                         self.log.warning("send error: %s", exc)
 
         except Exception as exc:
-            self.log.error("stream error: %s", exc)
+            if not self._stop.is_set():
+                self.log.error("capture stream error: %s", exc)
+                _RESTART_EVENT.set()
 
     def start(self):
         self._stop.clear()
@@ -597,10 +618,10 @@ class Receiver:
     # ── playback thread ───────────────────────────────────────────────────────
 
     def _play_loop(self):
-        dev = find_device(self.device, "output")
-        sr, fps = self.codec.sr, self.codec.fps
-
         try:
+            dev = find_device(self.device, "output")
+            sr, fps = self.codec.sr, self.codec.fps
+
             with sd.OutputStream(
                 device     = dev,
                 samplerate = sr,
@@ -613,7 +634,9 @@ class Receiver:
                 while not self._stop.is_set():
                     time.sleep(0.1)
         except Exception as exc:
-            self.log.error("playback error: %s", exc)
+            if not self._stop.is_set():
+                self.log.error("playback error: %s", exc)
+                _RESTART_EVENT.set()
 
     def start(self):
         self._stop.clear()
@@ -664,15 +687,17 @@ class Heartbeat:
 class Monitor:
     """
     Periodically prints packet-loss statistics and warns when a stream
-    goes silent for longer than *timeout* seconds.
+    goes silent for longer than *timeout* seconds. Also monitors for
+    default device changes.
     """
 
     def __init__(self, stats_list: list, receivers: list,
-                 interval: float, timeout: float):
+                 interval: float, timeout: float, check_default: bool):
         self._stats   = stats_list
         self._recvs   = receivers
         self._iv      = interval
         self._timeout = timeout
+        self._check_def = check_default
         self._stop    = threading.Event()
         self._was_ok: dict = {}
 
@@ -682,9 +707,26 @@ class Monitor:
 
     def _loop(self):
         log = logging.getLogger("monitor")
+        last_def_in, last_def_out = None, None
+        
+        if self._check_def:
+            last_def_in, last_def_out = get_default_device_names()
+
+        tick = 0
         while not self._stop.is_set():
-            time.sleep(self._iv)
-            print("\n── Stream Statistics ───────────────────────────────────────────")
+            time.sleep(1.0)
+            tick += 1
+            
+            if self._check_def and tick % 2 == 0:
+                cur_in, cur_out = get_default_device_names()
+                if cur_in is not None and cur_out is not None:
+                    if cur_in != last_def_in or cur_out != last_def_out:
+                        log.info("Default audio device changed. Reconnecting...")
+                        _RESTART_EVENT.set()
+                        break
+
+            if self._iv > 0 and tick % max(1, int(self._iv)) == 0:
+                print("\n── Stream Statistics ───────────────────────────────────────────")
             for s in self._stats:
                 r = s.report()
                 print(f"  {r['name']:<22}  "
@@ -784,83 +826,57 @@ def main():
 
     log.info("Role: %s  |  Codec backend: %s", role, _CODEC_BACKEND)
 
-    # ── Build codec ───────────────────────────────────────────────────────────
+    audio_cfg = cfg["audio"]["remote" if role == "remote" else "local"]
+    uses_default = "default" in (audio_cfg["capture_device"].lower(), audio_cfg["playback_device"].lower())
 
-    codec = build_codec(cfg["codec"])
+    while True:
+        _RESTART_EVENT.clear()
+        
+        # Refresh PortAudio device list to see newly plugged devices
+        sd._terminate()
+        sd._initialize()
 
-    # ── Wire up sender / receiver based on role ───────────────────────────────
+        codec = build_codec(cfg["codec"])
 
-    if role == "remote":
-        # Remote machine (radio side, Win10)
-        #   capture: USB Codec Mic (radio RX output)  → encode → UDP → local:rx_port
-        #   playback: receive from local:tx_port → decode → USB Codec Speaker (TX input)
-        audio = cfg["audio"]["remote"]
+        rx_stats = Stats("Radio-RX → local" if role == "remote" else "Radio-RX → speaker")
 
-        sender = Sender(
-            device = audio["capture_device"],
-            dest   = (local_ip, rx_port),
-            codec  = codec,
-        )
-        rx_stats = Stats("Radio-RX → local")
-        receiver = Receiver(
-            device    = audio["playback_device"],
-            port      = tx_port,
-            codec     = codec,
-            stats     = rx_stats,
-            jitter_ms = jitter_ms,
-        )
-        # Heartbeats go to local's rx_port so the local receiver knows we're alive
-        heartbeat = Heartbeat(dest=(local_ip, rx_port), interval=hb_iv)
+        if role == "remote":
+            sender = Sender(audio_cfg["capture_device"], (local_ip, rx_port), codec)
+            receiver = Receiver(audio_cfg["playback_device"], tx_port, codec, rx_stats, jitter_ms)
+            heartbeat = Heartbeat((local_ip, rx_port), hb_iv)
+        else:
+            sender = Sender(audio_cfg["capture_device"], (remote_ip, tx_port), codec)
+            receiver = Receiver(audio_cfg["playback_device"], rx_port, codec, rx_stats, jitter_ms)
+            heartbeat = Heartbeat((remote_ip, tx_port), hb_iv)
 
-    else:
-        # Local machine (operator desk, Win11)
-        #   capture: local mic → encode → UDP → remote:tx_port
-        #   playback: receive from remote:rx_port → decode → local speaker
-        audio = cfg["audio"]["local"]
+        monitor = Monitor([rx_stats], [receiver], stats_iv, conn_tout, uses_default)
 
-        sender = Sender(
-            device = audio["capture_device"],
-            dest   = (remote_ip, tx_port),
-            codec  = codec,
-        )
-        rx_stats = Stats("Radio-RX → speaker")
-        receiver = Receiver(
-            device    = audio["playback_device"],
-            port      = rx_port,
-            codec     = codec,
-            stats     = rx_stats,
-            jitter_ms = jitter_ms,
-        )
-        # Heartbeats go to remote's tx_port so remote receiver knows we're alive
-        heartbeat = Heartbeat(dest=(remote_ip, tx_port), interval=hb_iv)
-
-    monitor = Monitor(
-        stats_list = [rx_stats],
-        receivers  = [receiver],
-        interval   = stats_iv,
-        timeout    = conn_tout,
-    )
-
-    # ── Run ───────────────────────────────────────────────────────────────────
-
-    try:
+        log.info("Starting audio streams...")
         receiver.start()
         sender.start()
         heartbeat.start()
         monitor.start()
-        log.info("Bridge running – Ctrl+C to stop.")
-        while True:
-            time.sleep(1)
 
-    except KeyboardInterrupt:
-        log.info("Shutting down…")
+        try:
+            while not _RESTART_EVENT.is_set():
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            log.info("Shutting down…")
+            break
 
-    finally:
+        log.warning("Audio device issue or change detected. Restarting streams in 1 second...")
+        monitor.stop()
         heartbeat.stop()
         sender.stop()
         receiver.stop()
-        monitor.stop()
-        log.info("Stopped.")
+        time.sleep(1)
+
+    # final shutdown if we broke out of loop
+    monitor.stop()
+    heartbeat.stop()
+    sender.stop()
+    receiver.stop()
+    log.info("Stopped.")
 
 
 if __name__ == "__main__":
